@@ -129,7 +129,7 @@ class APIController:
             result = self.messaging_capability.create_new_conversation(user_id, title)
             
             # Convertir ResponseDTO a respuesta HTTP
-            return ResponseHandler.send_json_response(result)
+            return ResponseHandler.send_response(result)
             
         except Exception as e:
             return ResponseHandler.send_error(
@@ -165,7 +165,7 @@ class APIController:
             )
             
             # Convertir ResponseDTO a respuesta HTTP
-            return ResponseHandler.send_json_response(result)
+            return ResponseHandler.send_response(result)
             
         except Exception as e:
             return ResponseHandler.send_error(
@@ -194,7 +194,7 @@ class APIController:
                 user_id, session_id
             )
             
-            return ResponseHandler.send_json_response(result)
+            return ResponseHandler.send_response(result)
             
         except Exception as e:
             return ResponseHandler.send_error(

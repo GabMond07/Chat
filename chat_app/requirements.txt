@@ -9,6 +9,9 @@ certifi==2025.10.5
 charset-normalizer==3.4.4
 click==8.3.0
 colorama==0.4.6
+flask-socketio==5.3.6
+python-socketio==5.10.0
+eventlet==0.33.3
 datasets==4.2.0
 dill==0.4.0
 filelock==3.20.0
@@ -36,6 +39,7 @@ pandas==2.3.3
 propcache==0.4.1
 psutil==7.1.1
 pyarrow==21.0.0
+pytest==8.0.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
 pytz==2025.2

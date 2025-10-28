@@ -7,6 +7,30 @@ class ResponseHandler:
     Dependiente de Flask - Capa de Transporte
     """
     
+    @staticmethod
+    def send_response(response_dto: ResponseDTO):
+        """
+        Convierte un ResponseDTO en una respuesta HTTP
+        
+        Args:
+            response_dto: ResponseDTO a convertir
+            
+        Returns:
+            Respuesta JSON de Flask
+        """
+        if response_dto.success:
+            return ResponseHandler.send_success(
+                message=response_dto.message,
+                data=response_dto.data,
+                status_code=200 if response_dto.data else 204
+            )
+        else:
+            return ResponseHandler.send_error(
+                message=response_dto.message,
+                error_code=response_dto.error_code,
+                status_code=response_dto.status_code
+            )
+    
     # Mapeo de códigos de error a códigos HTTP
     ERROR_CODE_MAP = {
         'USER_NOT_FOUND': 404,

@@ -1,4 +1,5 @@
 from typing import Optional
+import traceback
 from dtos import MessageDTO, ResponseDTO, ConversationDTO
 from services.agnostic.entity.conversation_service import ConversationService
 from services.agnostic.entity.message_service import MessageService
@@ -6,6 +7,7 @@ from services.agnostic.entity.user_service import UserService
 from services.agnostic.utility.text_utils import TextUtils
 from services.ai_service import AIService
 from config import Config
+from utils.logger import logger
 
 class MessagingCapability:
     """
@@ -22,8 +24,7 @@ class MessagingCapability:
         """
         self.ai_service = ai_service
     
-    def process_user_message(self, user_id: int, session_id: int, 
-                            message_content: str) -> ResponseDTO:
+    def process_user_message(self, user_id: int, session_id: int, message_content: str) -> ResponseDTO:
         """
         Procesa un mensaje del usuario (flujo completo)
         
@@ -42,53 +43,103 @@ class MessagingCapability:
         Returns:
             ResponseDTO con el resultado del procesamiento
         """
-        # Paso 1: Validar usuario
-        user = UserService.get_user(user_id)
+        logger.info(f"Iniciando procesamiento de mensaje - User ID: {user_id}, Session ID: {session_id}")
+        
+        try:
+            # Paso 1: Validar usuario
+            logger.debug(f"Validando usuario {user_id}")
+            user = UserService.get_user(user_id)
+        except Exception as e:
+            logger.error(f"Error al validar usuario: {str(e)}\n{traceback.format_exc()}")
+            return ResponseDTO.error_response(
+                "Error al validar usuario",
+                error_code="USER_VALIDATION_ERROR"
+            )
+
         if not user:
+            logger.warning(f"Usuario no encontrado: {user_id}")
             return ResponseDTO.error_response(
                 "Usuario no encontrado",
                 error_code="USER_NOT_FOUND"
             )
         
         if not user.is_active:
+            logger.warning(f"Usuario inactivo: {user_id}")
             return ResponseDTO.error_response(
                 "Usuario inactivo",
                 error_code="USER_INACTIVE"
             )
         
         # Paso 2: Validar entrada
+        logger.debug("Validando entrada del mensaje")
         validation_result = self._validate_input(message_content)
         if not validation_result['valid']:
+            logger.warning(f"Validación fallida: {validation_result['error']}")
             return ResponseDTO.error_response(
                 validation_result['error'],
                 error_code="INVALID_INPUT"
             )
         
         # Limpiar texto
+        logger.debug("Limpiando texto del mensaje")
         cleaned_message = TextUtils.sanitize_input(message_content)
         
-        # Paso 3: Guardar mensaje del usuario
-        user_message = ConversationService.save_conversation_message(
-            session_id, 'user', cleaned_message
-        )
-        
-        if not user_message:
+        # Paso 3: Validar que la conversación existe
+        logger.debug(f"Verificando conversación {session_id}")
+        conversation = ConversationService.get_conversation(session_id)
+        if not conversation:
+            logger.warning(f"Conversación no encontrada: {session_id}")
             return ResponseDTO.error_response(
-                "Error al guardar mensaje",
+                "Conversación no encontrada",
+                error_code="CONVERSATION_NOT_FOUND"
+            )
+            
+        # Paso 4: Guardar mensaje del usuario
+        logger.debug(f"Guardando mensaje del usuario en sesión {session_id}")
+        try:
+            user_message = MessageService.save_message(
+                session_id=session_id,
+                user_id=user_id,
+                content=cleaned_message,
+                is_bot=False
+            )
+            
+            if not user_message:
+                logger.error(f"Error al guardar mensaje del usuario - Session ID: {session_id}")
+                return ResponseDTO.error_response(
+                    "Error al guardar mensaje",
+                    error_code="SAVE_ERROR"
+                )
+        except Exception as e:
+            logger.error(f"Excepción al guardar mensaje del usuario: {str(e)}\n{traceback.format_exc()}")
+            return ResponseDTO.error_response(
+                f"Error al guardar mensaje: {str(e)}",
                 error_code="SAVE_ERROR"
             )
         
-        # Paso 4: Consultar IA
-        ai_response = self._query_ai(cleaned_message)
-        if not ai_response:
-            return ResponseDTO.error_response(
-                "Error al generar respuesta de IA",
-                error_code="AI_ERROR"
+        # Paso 5: Consultar IA
+        logger.debug("Consultando servicio de IA")
+        try:
+            # CORRECCIÓN: Usar query_ai_model() en lugar de generate_response()
+            ai_response = self.ai_service.query_ai_model(
+                cleaned_message,
+                max_length=1000  # O usar Config.AI_MAX_LENGTH si existe
             )
+            
+            if not ai_response:
+                logger.error("Servicio de IA no generó respuesta")
+                ai_response = "Lo siento, no pude generar una respuesta en este momento."
+        except Exception as e:
+            logger.error(f"Error en el servicio de IA: {str(e)}\n{traceback.format_exc()}")
+            # En lugar de retornar error, usar respuesta por defecto
+            ai_response = "Lo siento, hubo un problema al procesar tu mensaje."
         
-        # Paso 5: Guardar respuesta del bot
-        bot_message = ConversationService.save_conversation_message(
-            session_id, 'bot', ai_response
+        # Paso 6: Guardar respuesta del bot
+        bot_message = MessageService.save_message(
+            session_id=session_id,
+            user_id=user_id,  # Usamos el mismo user_id para mantener el contexto
+            content=ai_response,
+            is_bot=True
         )
         
         if not bot_message:
@@ -97,7 +148,8 @@ class MessagingCapability:
                 error_code="SAVE_ERROR"
             )
         
-        # Paso 6: Devolver respuesta
+        # Paso 7: Devolver respuesta
+        logger.info(f"Mensaje procesado exitosamente - Session ID: {session_id}")
         return ResponseDTO.success_response(
             "Mensaje procesado exitosamente",
             data={
@@ -117,33 +169,42 @@ class MessagingCapability:
         Returns:
             ResponseDTO con la conversación creada
         """
-        # Validar usuario
-        user = UserService.get_user(user_id)
-        if not user:
-            return ResponseDTO.error_response(
-                "Usuario no encontrado",
-                error_code="USER_NOT_FOUND"
+        logger.info(f"Creando nueva conversación - User ID: {user_id}, Title: {title}")
+        
+        try:
+            # Validar usuario
+            user = UserService.get_user(user_id)
+            if not user:
+                logger.warning(f"Usuario no encontrado: {user_id}")
+                return ResponseDTO.error_response(
+                    "Usuario no encontrado",
+                    error_code="USER_NOT_FOUND"
+                )
+            
+            # Crear conversación
+            new_conversation = ConversationService.create_conversation(
+                user_id=user_id,
+                title=title
             )
-        
-        # Crear conversación
-        conversation_data = ConversationDTO(
-            user_id=user_id,
-            title=title,
-            is_active=True
-        )
-        
-        new_conversation = ConversationService.create_conversation(conversation_data)
-        
-        if not new_conversation:
-            return ResponseDTO.error_response(
-                "Error al crear conversación",
-                error_code="CREATE_ERROR"
+            
+            if not new_conversation:
+                logger.error(f"Error al crear conversación para usuario {user_id}")
+                return ResponseDTO.error_response(
+                    "Error al crear conversación",
+                    error_code="CREATE_ERROR"
+                )
+            
+            logger.info(f"Conversación creada exitosamente - ID: {new_conversation.get('id', 'N/A')}")
+            return ResponseDTO.success_response(
+                "Conversación creada exitosamente",
+                data=new_conversation
             )
-        
-        return ResponseDTO.success_response(
-            "Conversación creada exitosamente",
-            data=new_conversation
-        )
+        except Exception as e:
+            logger.error(f"Error inesperado al crear conversación: {str(e)}\n{traceback.format_exc()}")
+            return ResponseDTO.error_response(
+                f"Error interno: {str(e)}",
+                error_code="INTERNAL_ERROR"
+            )
     
     def get_conversation_history(self, user_id: int, session_id: int) -> ResponseDTO:
         """
@@ -156,34 +217,73 @@ class MessagingCapability:
         Returns:
             ResponseDTO con el historial
         """
-        # Validar usuario
-        user = UserService.get_user(user_id)
-        if not user:
+        logger.info(f"Obteniendo historial - User ID: {user_id}, Session ID: {session_id}")
+        
+        try:
+            # Validar usuario
+            logger.debug(f"Validando usuario {user_id}")
+            user = UserService.get_user(user_id)
+            if not user:
+                logger.warning(f"Usuario no encontrado: {user_id}")
+                return ResponseDTO.error_response(
+                    "Usuario no encontrado",
+                    error_code="USER_NOT_FOUND"
+                )
+            
+            # Obtener conversación
+            logger.debug(f"Buscando conversación {session_id}")
+            try:
+                conversation = ConversationService.get_conversation(session_id)
+            except Exception as e:
+                logger.error(f"Error al obtener conversación: {str(e)}\n{traceback.format_exc()}")
+                return ResponseDTO.error_response(
+                    f"Error al obtener conversación: {str(e)}",
+                    error_code="INTERNAL_ERROR"
+                )
+            
+            if not conversation:
+                logger.warning(f"Conversación no encontrada: {session_id}")
+                return ResponseDTO.error_response(
+                    "Conversación no encontrada",
+                    error_code="CONVERSATION_NOT_FOUND"
+                )
+            
+            # Verificar que la conversación pertenece al usuario
+            # NOTA: conversation puede ser un dict o un objeto, adaptamos
+            conv_user_id = conversation.get('user_id') if isinstance(conversation, dict) else getattr(conversation, 'user_id', None)
+            
+            if conv_user_id != user_id:
+                logger.warning(f"Usuario {user_id} no autorizado para acceder a conversación {session_id}")
+                return ResponseDTO.error_response(
+                    "No autorizado para acceder a esta conversación",
+                    error_code="UNAUTHORIZED"
+                )
+            
+            # Convertir a diccionario para la respuesta
+            try:
+                if isinstance(conversation, dict):
+                    conversation_dict = conversation
+                else:
+                    conversation_dict = conversation.to_dict()
+                
+                logger.info(f"Historial obtenido exitosamente para conversación {session_id}")
+                return ResponseDTO.success_response(
+                    "Historial obtenido exitosamente",
+                    data=conversation_dict
+                )
+            except Exception as e:
+                logger.error(f"Error al convertir conversación a diccionario: {str(e)}\n{traceback.format_exc()}")
+                return ResponseDTO.error_response(
+                    "Error al procesar datos de la conversación",
+                    error_code="INTERNAL_ERROR"
+                )
+                
+        except Exception as e:
+            logger.error(f"Error inesperado al obtener historial: {str(e)}\n{traceback.format_exc()}")
             return ResponseDTO.error_response(
-                "Usuario no encontrado",
-                error_code="USER_NOT_FOUND"
+                "Error interno del servidor",
+                error_code="INTERNAL_ERROR"
             )
-        
-        # Obtener conversación
-        conversation = ConversationService.get_conversation(session_id, include_messages=True)
-        
-        if not conversation:
-            return ResponseDTO.error_response(
-                "Conversación no encontrada",
-                error_code="CONVERSATION_NOT_FOUND"
-            )
-        
-        # Verificar que la conversación pertenece al usuario
-        if conversation.user_id != user_id:
-            return ResponseDTO.error_response(
-                "No autorizado",
-                error_code="UNAUTHORIZED"
-            )
-        
-        return ResponseDTO.success_response(
-            "Historial obtenido exitosamente",
-            data=conversation
-        )
     
     def get_user_conversations(self, user_id: int) -> ResponseDTO:
         """
@@ -195,21 +295,40 @@ class MessagingCapability:
         Returns:
             ResponseDTO con lista de conversaciones
         """
-        # Validar usuario
-        user = UserService.get_user(user_id)
-        if not user:
-            return ResponseDTO.error_response(
-                "Usuario no encontrado",
-                error_code="USER_NOT_FOUND"
+        logger.info(f"Obteniendo conversaciones del usuario {user_id}")
+        
+        try:
+            # Validar usuario
+            user = UserService.get_user(user_id)
+            if not user:
+                logger.warning(f"Usuario no encontrado: {user_id}")
+                return ResponseDTO.error_response(
+                    "Usuario no encontrado",
+                    error_code="USER_NOT_FOUND"
+                )
+            
+            # Obtener conversaciones
+            conversations = ConversationService.get_conversations_by_user(user_id)
+            
+            # Convertir a diccionarios
+            conversations_data = []
+            for conv in conversations:
+                if isinstance(conv, dict):
+                    conversations_data.append(conv)
+                else:
+                    conversations_data.append(conv.to_dict())
+            
+            logger.info(f"Se encontraron {len(conversations_data)} conversaciones para usuario {user_id}")
+            return ResponseDTO.success_response(
+                "Conversaciones obtenidas exitosamente",
+                data=conversations_data
             )
-        
-        # Obtener conversaciones
-        conversations = ConversationService.get_conversations_by_user(user_id)
-        
-        return ResponseDTO.success_response(
-            "Conversaciones obtenidas exitosamente",
-            data=[conv.to_dict() for conv in conversations]
-        )
+        except Exception as e:
+            logger.error(f"Error al obtener conversaciones: {str(e)}\n{traceback.format_exc()}")
+            return ResponseDTO.error_response(
+                f"Error interno: {str(e)}",
+                error_code="INTERNAL_ERROR"
+            )
     
     def _validate_input(self, text: str) -> dict:
         """
@@ -250,9 +369,10 @@ class MessagingCapability:
         if not self.ai_service.is_ready():
             return "Lo siento, el servicio de IA no está disponible en este momento."
         
+        # CORRECCIÓN: Usar query_ai_model() en lugar de generate_response()
         response = self.ai_service.query_ai_model(
             text,
-            max_length=Config.AI_MAX_LENGTH
+            max_length=getattr(Config, 'AI_MAX_LENGTH', 1000)
         )
         
         if not response:

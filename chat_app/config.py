@@ -8,7 +8,7 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # Configuración del modelo de IA
-    AI_MODEL_NAME = "microsoft/DialoGPT-small"  # Modelo más ligero para desarrollo
+    AI_MODEL_NAME = "microsoft/DialoGPT-medium"  # Modelo más ligero para desarrollo
     AI_MAX_LENGTH = 1000  # Longitud máxima de la respuesta
     AI_TEMPERATURE = 0.7  # Temperatura para la generación de texto (0-1)
     
@@ -22,3 +22,7 @@ class Config:
     
     # Configuración de logs
     LOG_LEVEL = "INFO"
+
+    # Validaciones de mensajes
+    MIN_MESSAGE_LENGTH = 1
+    MAX_MESSAGE_LENGTH = 1000

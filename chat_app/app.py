@@ -18,8 +18,8 @@ def create_app(config_class=Config):
     # Crear base de datos
     with app.app_context():
         # Eliminar todas las tablas existentes
-        db.drop_all()
-        print("Base de datos eliminada")
+        # db.drop_all()
+        # print("Base de datos eliminada")
         
         # Crear todas las tablas nuevamente
         db.create_all()
