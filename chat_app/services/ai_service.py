@@ -28,15 +28,28 @@ class AIService:
             True si el modelo se cargó exitosamente
         """
         try:
+            if self._is_loaded and self.model is not None and self.tokenizer is not None:
+                print("Modelo ya está cargado")
+                return True
+                
             print(f"Cargando modelo {self.model_name}...")
+            
+            # Validar que estamos usando un modelo compatible
+            if not (self.model_name.startswith("microsoft/DialoGPT") or 
+                   self.model_name.startswith("facebook/blenderbot") or
+                   "/" in self.model_name):  # Para modelos locales o personalizados
+                raise ValueError(f"Modelo no soportado: {self.model_name}. Use DialoGPT o un modelo compatible con generación de texto.")
+            
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
             self._is_loaded = True
-            print("Modelo cargado exitosamente")
+            print(f"Modelo {self.model_name} cargado exitosamente")
             return True
         except Exception as e:
-            print(f"Error al cargar modelo: {str(e)}")
+            print(f"Error al cargar modelo {self.model_name}: {str(e)}")
             self._is_loaded = False
+            self.model = None
+            self.tokenizer = None
             return False
     
     def is_ready(self) -> bool:
@@ -55,30 +68,43 @@ class AIService:
             Texto generado por el modelo o None si hay error
         """
         if not self.is_ready():
+            print("Modelo no está listo (not is_ready())")
+            return None
+            
+        if not self.tokenizer or not self.model:
+            print("Tokenizer o modelo no inicializados")
             return None
         
         try:
+            print(f"Procesando entrada: '{input_text}'")
             # Tokenizar entrada
             inputs = self.tokenizer.encode(input_text + self.tokenizer.eos_token, 
                                           return_tensors='pt')
             
-            # Generar respuesta
+            print("Input tokenizado, generando respuesta...")
+            # Generar respuesta con parámetros ajustados
             outputs = self.model.generate(
                 inputs,
                 max_length=max_length,
+                min_length=20,  # Asegurar respuestas no muy cortas
                 pad_token_id=self.tokenizer.eos_token_id,
                 do_sample=True,
-                top_p=0.92,
-                top_k=50
+                temperature=0.7,  # Controlar creatividad
+                top_p=0.9,
+                top_k=50,
+                num_return_sequences=1,
+                no_repeat_ngram_size=2  # Evitar repeticiones
             )
             
+            print("Respuesta generada, decodificando...")
             # Decodificar respuesta
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             
-            # Remover el input del output
+            # Remover el input del output y limpiar
             if response.startswith(input_text):
                 response = response[len(input_text):].strip()
             
+            print(f"Respuesta final: '{response[:100]}...'")
             return response
             
         except Exception as e:

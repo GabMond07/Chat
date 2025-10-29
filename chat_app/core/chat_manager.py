@@ -8,7 +8,7 @@ class ChatManager:
         """
         Inicializa el gestor de chat
         """
-        self.ai_service = AIService(model_name="gpt-3.5-turbo")  # o el modelo que estés usando
+        self.ai_service = AIService(model_name="microsoft/DialoGPT-medium")  # Usar el modelo de DialoGPT
         self.messaging_capability = MessagingCapability(self.ai_service)
         logger.info("ChatManager inicializado con servicios")
 

@@ -120,19 +120,39 @@ class MessagingCapability:
         # Paso 5: Consultar IA
         logger.debug("Consultando servicio de IA")
         try:
-            # CORRECCIÓN: Usar query_ai_model() en lugar de generate_response()
+            if not self.ai_service.is_ready():
+                logger.error("Servicio de IA no está inicializado")
+                # Intentar cargar el modelo si no está listo
+                if self.ai_service.load_model():
+                    logger.info("Modelo cargado exitosamente en el intento")
+                else:
+                    logger.error("No se pudo cargar el modelo de IA")
+                    return ResponseDTO.error_response(
+                        "Servicio de IA no disponible",
+                        error_code="AI_SERVICE_ERROR"
+                    )
+            
+            # Consultar al modelo
             ai_response = self.ai_service.query_ai_model(
                 cleaned_message,
-                max_length=1000  # O usar Config.AI_MAX_LENGTH si existe
+                max_length=1000
             )
             
             if not ai_response:
                 logger.error("Servicio de IA no generó respuesta")
-                ai_response = "Lo siento, no pude generar una respuesta en este momento."
+                return ResponseDTO.error_response(
+                    "No se pudo generar una respuesta",
+                    error_code="AI_GENERATION_ERROR"
+                )
+                
+            logger.info(f"IA generó respuesta: {ai_response[:100]}...")
+            
         except Exception as e:
             logger.error(f"Error en el servicio de IA: {str(e)}\n{traceback.format_exc()}")
-            # En lugar de retornar error, usar respuesta por defecto
-            ai_response = "Lo siento, hubo un problema al procesar tu mensaje."
+            return ResponseDTO.error_response(
+                "Error al procesar la respuesta",
+                error_code="AI_PROCESSING_ERROR"
+            )
         
         # Paso 6: Guardar respuesta del bot
         bot_message = MessageService.save_message(
