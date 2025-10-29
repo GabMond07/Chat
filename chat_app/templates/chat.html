@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat App</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/styles.css') }}"
+    />
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  </head>
+  <body>
+    <div class="chat-container">
+      <!-- Sidebar con historial -->
+      <div class="sidebar">
+        <div class="user-profile">
+          <img
+            src="{{ url_for('static', filename='img/default-avatar.png') }}"
+            alt="Profile"
+            id="userAvatar"
+          />
+          <span id="userName">Cargando...</span>
+          <button
+            id="logoutBtn"
+            class="btn btn-secondary"
+            onclick="handleLogout()"
+          >
+            Cerrar Sesión
+          </button>
+          <span class="online-status online"></span>
+        </div>
+        <div class="chat-history" id="chatHistory">
+          <!-- El historial se cargará dinámicamente -->
+        </div>
+      </div>
+
+      <!-- Chat principal -->
+      <div class="main-chat">
+        <div class="chat-header">
+          <div>
+            <h2 id="currentChatTitle">Chat</h2>
+            <span class="typing-indicator" id="typingIndicator"></span>
+          </div>
+          <button class="btn btn-primary" onclick="showNewChatModal()">
+            Nueva Conversación
+          </button>
+        </div>
+
+        <div class="messages-container" id="messagesContainer">
+          <!-- Los mensajes se cargarán dinámicamente -->
+        </div>
+
+        <div class="chat-input">
+          <div class="input-group">
+            <input
+              type="text"
+              id="messageInput"
+              class="message-input"
+              placeholder="Escribe un mensaje..."
+            />
+            <button class="send-button" onclick="sendMessage()">Enviar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal para Nueva Conversación -->
+    <div id="newChatModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Nueva Conversación</h3>
+          <span class="close" onclick="hideNewChatModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+          <form id="newChatForm">
+            <div class="form-group">
+              <label for="chatTitle">Título de la conversación:</label>
+              <input
+                type="text"
+                id="chatTitle"
+                class="form-control"
+                placeholder="Ingresa un título..."
+                maxlength="100"
+                required
+              />
+              <div class="form-text">Máximo 100 caracteres.</div>
+            </div>
+            <div id="modalError" class="error-message"></div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            onclick="hideNewChatModal()"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick="handleCreateChat()"
+          >
+            Crear
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let socket;
+      let currentUser = null;
+      let currentSession = null;
+
+      // Verificar autenticación
+      function checkAuth() {
+        const token = localStorage.getItem("authToken");
+        if (!token) {
+          window.location.href = "/login";
+          return false;
+        }
+        return token;
+      }
+
+      function handleLogout() {
+        localStorage.removeItem("authToken");
+        window.location.href = "/login";
+      }
+
+      // Inicializar socket y eventos
+      async function initializeSocket() {
+        const token = checkAuth();
+        if (!token) return;
+        try {
+          // Obtener información del usuario
+          const userResponse = await fetch("/api/users/me", {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          currentUser = await userResponse.json();
+
+          // Actualizar UI con información del usuario
+          document.getElementById("userName").textContent =
+            currentUser.username;
+
+          // Conectar socket
+          socket = io(window.location.origin, {
+            auth: { token: token },
+          });
+
+          // Eventos del socket
+          socket.on("connect", () => {
+            console.log("Conectado al servidor");
+          });
+          socket.on("new_message", (data) => {
+            addMessageToUI(data);
+          });
+          socket.on("user_typing", (data) => {
+            updateTypingIndicator(data);
+          });
+          socket.on("error", (error) => {
+            console.error("Error del socket:", error);
+          });
+
+          // Cargar historial de chats
+          loadChatHistory();
+        } catch (error) {
+          console.error("Error de inicialización:", error);
+          if (error && error.status === 401) {
+            localStorage.removeItem("authToken");
+            window.location.href = "/login";
+          }
+        }
+      }
+
+      // Cargar historial de chats
+      async function loadChatHistory() {
+        const token = checkAuth();
+        try {
+          // Usar el user_id del usuario actual
+          const userId = currentUser.id;
+          const response = await fetch(`/api/users/${userId}/conversations`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          const data = await response.json();
+          const history = data.data || [];
+
+          const historyContainer = document.getElementById("chatHistory");
+          historyContainer.innerHTML = "";
+
+          history.forEach((chat) => {
+            const chatElement = document.createElement("div");
+            chatElement.className = "chat-history-item";
+            chatElement.onclick = () => loadChat(chat.id);
+            chatElement.innerHTML = `
+              <div>${chat.title}</div>
+              <small class="text-muted">${
+                chat.created_at
+                  ? new Date(chat.created_at).toLocaleDateString()
+                  : ""
+              }</small>
+            `;
+            historyContainer.appendChild(chatElement);
+          });
+        } catch (error) {
+          console.error("Error al cargar historial:", error);
+        }
+      }
+
+      // Cargar chat específico
+      async function loadChat(chatId) {
+        const token = checkAuth();
+        try {
+          const userId = currentUser.id;
+          const response = await fetch(
+            `/api/conversations/${chatId}?user_id=${userId}`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+          const data = await response.json();
+          const chat = data.data || {};
+
+          currentSession = chatId;
+          document.getElementById("currentChatTitle").textContent =
+            chat.title || "Chat";
+
+          const messagesContainer =
+            document.getElementById("messagesContainer");
+          messagesContainer.innerHTML = "";
+
+          (chat.messages || []).forEach((msg) => {
+            addMessageToUI(msg);
+          });
+
+          // Unirse a la sala de socket
+          socket.emit("join", {
+            user_id: currentUser.id,
+            session_id: chatId,
+          });
+
+          // Scroll al final
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        } catch (error) {
+          console.error("Error al cargar chat:", error);
+        }
+      }
+
+      // Enviar mensaje
+      async function sendMessage() {
+        if (!currentSession) {
+          alert("Por favor selecciona o crea una conversación");
+          return;
+        }
+
+        const input = document.getElementById("messageInput");
+        const content = input.value.trim();
+        if (!content) return;
+
+        socket.emit("message", {
+          user_id: currentUser.id,
+          session_id: currentSession,
+          content: content,
+        });
+
+        input.value = "";
+      }
+
+      // Mostrar modal de nueva conversación
+      function showNewChatModal() {
+        const modal = document.getElementById("newChatModal");
+        const input = document.getElementById("chatTitle");
+        modal.style.display = "flex";
+        input.value = "";
+        input.focus();
+        document.getElementById("modalError").textContent = "";
+      }
+
+      // Ocultar modal
+      function hideNewChatModal() {
+        const modal = document.getElementById("newChatModal");
+        modal.style.display = "none";
+      }
+
+      // Crear nueva conversación desde modal
+      async function handleCreateChat() {
+        const token = checkAuth();
+        const title = document.getElementById("chatTitle").value.trim();
+        const errorEl = document.getElementById("modalError");
+
+        if (!title) {
+          errorEl.textContent = "El título es requerido.";
+          return;
+        }
+
+        if (title.length > 100) {
+          errorEl.textContent = "El título no puede exceder 100 caracteres.";
+          return;
+        }
+
+        try {
+          const response = await fetch("/api/conversations", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ user_id: currentUser.id, title: title }),
+          });
+          const data = await response.json();
+
+          if (response.ok && data.data && data.data.id) {
+            // Recargar historial y abrir nuevo chat
+            await loadChatHistory();
+            loadChat(data.data.id);
+            hideNewChatModal();
+          } else {
+            errorEl.textContent =
+              data.message || "Error al crear conversación.";
+          }
+        } catch (error) {
+          console.error("Error al crear chat:", error);
+          errorEl.textContent = "Error de conexión. Intenta de nuevo.";
+        }
+      }
+
+      // Agregar mensaje a la UI
+      function addMessageToUI(message) {
+        const container = document.getElementById("messagesContainer");
+        const messageElement = document.createElement("div");
+        messageElement.className = `message ${
+          message.user_id === currentUser.id ? "outgoing" : "incoming"
+        }`;
+
+        messageElement.innerHTML = `
+          <div class="message-content">${message.content}</div>
+          <div class="message-time">${new Date(
+            message.timestamp
+          ).toLocaleTimeString()}</div>
+        `;
+
+        container.appendChild(messageElement);
+        container.scrollTop = container.scrollHeight;
+      }
+
+      // Actualizar indicador de escritura
+      function updateTypingIndicator(data) {
+        const indicator = document.getElementById("typingIndicator");
+        if (data.typing && data.user_id !== currentUser.id) {
+          indicator.textContent = "Escribiendo...";
+        } else {
+          indicator.textContent = "";
+        }
+      }
+
+      // Eventos de UI
+      document.getElementById("messageInput").addEventListener("input", () => {
+        if (currentSession) {
+          socket.emit("typing", {
+            user_id: currentUser.id,
+            session_id: currentSession,
+            typing: true,
+          });
+
+          clearTimeout(window.typingTimeout);
+          window.typingTimeout = setTimeout(() => {
+            socket.emit("typing", {
+              user_id: currentUser.id,
+              session_id: currentSession,
+              typing: false,
+            });
+          }, 1000);
+        }
+      });
+
+      // Cerrar modal al hacer clic fuera
+      window.onclick = function (event) {
+        const modal = document.getElementById("newChatModal");
+        if (event.target === modal) {
+          hideNewChatModal();
+        }
+      };
+
+      // Inicializar la aplicación
+      initializeSocket();
+    </script>
+  </body>
+</html>

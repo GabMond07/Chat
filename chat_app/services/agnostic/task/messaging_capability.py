@@ -206,18 +206,18 @@ class MessagingCapability:
                 user_id=user_id,
                 title=title
             )
-            
             if not new_conversation:
                 logger.error(f"Error al crear conversación para usuario {user_id}")
                 return ResponseDTO.error_response(
                     "Error al crear conversación",
                     error_code="CREATE_ERROR"
                 )
-            
-            logger.info(f"Conversación creada exitosamente - ID: {new_conversation.get('id', 'N/A')}")
+            # Convertir a dict para log y respuesta
+            conversation_dict = new_conversation.to_dict() if hasattr(new_conversation, 'to_dict') else {'id': getattr(new_conversation, 'id', 'N/A')}
+            logger.info(f"Conversación creada exitosamente - ID: {conversation_dict.get('id', 'N/A')}")
             return ResponseDTO.success_response(
                 "Conversación creada exitosamente",
-                data=new_conversation
+                data=conversation_dict
             )
         except Exception as e:
             logger.error(f"Error inesperado al crear conversación: {str(e)}\n{traceback.format_exc()}")
@@ -328,15 +328,42 @@ class MessagingCapability:
                 )
             
             # Obtener conversaciones
-            conversations = ConversationService.get_conversations_by_user(user_id)
+            conversations = ConversationService.get_user_conversations(user_id)
             
             # Convertir a diccionarios
             conversations_data = []
             for conv in conversations:
-                if isinstance(conv, dict):
-                    conversations_data.append(conv)
-                else:
-                    conversations_data.append(conv.to_dict())
+                try:
+                    if isinstance(conv, dict):
+                        # Asegurar que tenga mensajes
+                        if 'messages' not in conv or not isinstance(conv['messages'], list):
+                            conv['messages'] = []
+                        conversations_data.append(conv)
+                    else:
+                        # Serializar mensajes manualmente si es necesario
+                        messages = []
+                        if hasattr(conv, 'messages') and conv.messages is not None:
+                            for msg in conv.messages:
+                                try:
+                                    messages.append(msg.to_dict())
+                                except Exception as e:
+                                    logger.error(f"Error serializando mensaje (ID: {getattr(msg, 'id', None)}): {str(e)}")
+                        conversations_data.append({
+                            'id': getattr(conv, 'id', None),
+                            'user_id': getattr(conv, 'user_id', None),
+                            'title': getattr(conv, 'title', None),
+                            'created_at': str(getattr(conv, 'created_at', '')),
+                            'messages': messages
+                        })
+                except Exception as e:
+                    logger.error(f"Error al convertir conversación a dict (ID: {getattr(conv, 'id', None)}): {str(e)}")
+                    conversations_data.append({
+                        'id': getattr(conv, 'id', None),
+                        'user_id': getattr(conv, 'user_id', None),
+                        'title': getattr(conv, 'title', None),
+                        'created_at': str(getattr(conv, 'created_at', '')),
+                        'messages': []
+                    })
             
             logger.info(f"Se encontraron {len(conversations_data)} conversaciones para usuario {user_id}")
             return ResponseDTO.success_response(

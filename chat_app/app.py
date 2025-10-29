@@ -52,6 +52,23 @@ def create_app(config_class=Config):
     def login():
         """Autenticar usuario"""
         return api_controller.login_user()
+
+    # =============================
+    # Rutas para servir HTML
+    # =============================
+    from flask import render_template
+
+    @app.route('/login')
+    def login_page():
+        return render_template('login.html')
+
+    @app.route('/register')
+    def register_page():
+        return render_template('register.html')
+
+    @app.route('/chat')
+    def chat_page():
+        return render_template('chat.html')
     
     @app.route('/api/users/<int:user_id>/conversations', methods=['GET'])
     def get_user_conversations(user_id):
