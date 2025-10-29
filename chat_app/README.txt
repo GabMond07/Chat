@@ -92,6 +92,8 @@ python app.py
 
 La aplicación estará disponible en `http://localhost:5000`
 
+Nota: la aplicación ahora soporta WebSockets (Flask-SocketIO). Se recomienda instalar `eventlet` y ejecutar tal como se indica en dependencias (`requirements.txt`) para soporte de WebSockets en desarrollo/producción ligera.
+
 ## 🔌 API Endpoints
 
 ### Usuarios

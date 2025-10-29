@@ -5,6 +5,7 @@ from models import db
 from services.ai_service import AIService
 from services.agnostic.task.messaging_capability import MessagingCapability
 from services.non_agnostic.api_controller import APIController
+from controllers.chat_controller import chat_bp, socketio
 
 def create_app(config_class=Config):
     """Factory para crear la aplicación Flask"""
@@ -82,6 +83,11 @@ def create_app(config_class=Config):
             'status': 'ok',
             'ai_service_ready': ai_service.is_ready()
         }
+
+    # Registrar blueprint de WebSocket / chat (controlador no-agnóstico)
+    app.register_blueprint(chat_bp, url_prefix='/chat')
+    # Inicializar SocketIO con la app
+    socketio.init_app(app, cors_allowed_origins="*")
     
     return app
 
@@ -120,4 +126,5 @@ if __name__ == '__main__':
     print("   GET    /api/health")
     print("\n" + "="*60 + "\n")
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Usar socketio.run para soportar WebSockets correctamente
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
